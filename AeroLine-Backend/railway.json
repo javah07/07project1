@@ -1,9 +1,0 @@
-{
-  "build": {
-    "builder": "NIXPACKS",
-    "buildCommand": "cd AeroLine-Backend && pip install -r requirements.txt"
-  },
-  "deploy": {
-    "startCommand": "cd AeroLine-Backend && uvicorn main:app --host 0.0.0.0 --port 8000"
-  }
-}
