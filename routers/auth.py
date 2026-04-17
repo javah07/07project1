@@ -14,16 +14,16 @@ from cryptography.hazmat.backends import default_backend
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
-  # ── Config from env ──
-  _JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
-  _DB_PATH = os.getenv("DB_PATH", "/data/aero.db")
-  _ISSUER = (os.getenv("ISSUER") or "").rstrip("/")
-  _AUDIENCE = os.getenv("AUDIENCE", "AeroSky")
+# ── Config from env ──
+_JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
+_DB_PATH = os.getenv("DB_PATH", "/data/aero.db")
+_ISSUER = (os.getenv("ISSUER") or "").rstrip("/")
+_AUDIENCE = os.getenv("AUDIENCE", "AeroSky")
 
-  # ── Rate limiting ──
-  _rate_limit: dict = {}
-  _RATE_WINDOW = 60
-  _RATE_MAX = 10
+# ── Rate limiting ──
+_rate_limit: dict = {}
+_RATE_WINDOW = 60
+_RATE_MAX = 10
 
 
   def _rate_check(ip: str) -> bool:
