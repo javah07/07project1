@@ -34,7 +34,6 @@ class ChainStatus(BaseModel):
 
     # Fixed: use computed_field not @property
     @computed_field
-    @property
     def total_latency_ms(self) -> int:
         return (
             self.open_vpn_latency_ms +
