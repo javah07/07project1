@@ -17,7 +17,7 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 # ── Config from env ──
 _JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
 _DB_PATH = os.getenv("DB_PATH", "/data/aero.db")
-_ISSUER = os.getenv("ISSUER") or "").rstrip("/")
+_ISSUER = (os.getenv("ISSUER") or "").rstrip("/")
 _AUDIENCE = os.getenv("AUDIENCE", "AeroLine")
 
 # ── RSA key pair (generated once at startup) ──
