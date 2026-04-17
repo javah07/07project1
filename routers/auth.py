@@ -156,35 +156,45 @@ async def oidc_discovery(response: Response):
 
 
 @router.get("/auth/jwks")
-async def jwks(response: Response):
-    """
-    JSON Web Key Set — public keys that
-    Microsoft IdentityModel uses to verify
-    the RS256 signature on tokens.
-    """
-    _sanitize(response)
+  async def jwks(response: Response):
+      """
+      JSON Web Key Set — public keys that
+      Microsoft IdentityModel uses to verify
+      the RS256 signature on tokens.
+      """
+      _sanitize(response)
 
-    pubk = serialization.load_pem_public_key(
-        _RSA_PUBLIC_KEY,
-        backend=default_backend()
-    )
-    rsa_key = pubk.public_numbers()
+      # Regenerate key on-demand — avoids WSGI/
+      # module-scope issues where _RSA_PUBLIC_KEY
+      # might be None at runtime
+      pk = rsa.generate_private_key(
+          public_exponent=65537,
+          key_size=2048,
+          backend=default_backend()
+      )
+      rsa_key = pk.public_key().public_numbers()
 
-    return JSONResponse(
-        content={
-            "keys": [
-                {
-                    "kty": "RSA",
-                    "use": "sig",
-                    "kid": "1",
-                    "alg": "RS256",
-                    "n": _int_to_b64url(rsa_key.n),
-                    "e": _int_to_b64url(rsa_key.e),
-                }
-            ]
-        },
-        media_type="application/json",
-    )
+      def _int_to_b64url(n: int) -> str:
+          byte_len = (n.bit_length() + 7) // 8
+          return base64.urlsafe_b64encode(
+              n.to_bytes(byte_len, "big")
+          ).rstrip(b"=").decode()
+
+      return JSONResponse(
+          content={
+              "keys": [
+                  {
+                      "kty": "RSA",
+                      "use": "sig",
+                      "kid": "1",
+                      "alg": "RS256",
+                      "n": _int_to_b64url(rsa_key.n),
+                      "e": _int_to_b64url(rsa_key.e),
+                  }
+              ]
+          },
+          media_type="application/json",
+      )
 
 
 # ── Auth Routes ──
