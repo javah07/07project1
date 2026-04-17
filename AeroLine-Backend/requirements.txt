@@ -7,4 +7,3 @@ pyotp==2.9.0
 pydantic==2.7.0
 bcrypt==4.2.0
 python-jose[cryptography]==3.3.0
-sqlite3
