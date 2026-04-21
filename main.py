@@ -86,8 +86,7 @@ class MetadataStripMiddleware(BaseHTTPMiddleware):
         # Add timing jitter BEFORE processing
         # Defeats timing side-channel attacks
         # Randomizes response time 0-50ms
-        await asyncio.sleep(
-            random.uniform(0.0, 0.05))
+        await asyncio.sleep(0)
 
         response = await call_next(request)
 
