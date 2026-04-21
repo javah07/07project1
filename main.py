@@ -92,9 +92,8 @@ class MetadataStripMiddleware(BaseHTTPMiddleware):
 
         # Strip fingerprinting headers
         for header in self.STRIP_HEADERS:
-            if header in response.headers:
-                del response.headers[header]
-
+            response.headers.pop(header, None)
+        
         # Override server header with generic
         response.headers["server"] = "AeroSky"
 
@@ -123,63 +122,10 @@ class MetadataStripMiddleware(BaseHTTPMiddleware):
         # Normalize content-length
         # Prevents size-based fingerprinting
         # by padding responses to fixed sizes
-        if "content-length" in response.headers:
-            del response.headers["content-length"]
+        response.headers.pop("content-length", None)
+        response.headers.pop("x-pad", None)
 
         return response
-
-
-# ═══════════════════════════════════════
-# REQUEST SANITIZER MIDDLEWARE
-# Strips metadata from incoming requests
-# before they touch any route logic
-# ═══════════════════════════════════════
-
-class RequestSanitizerMiddleware(
-    BaseHTTPMiddleware
-):
-    """
-    Strips identifying headers from
-    incoming requests.
-
-    Removes:
-    → User-Agent (app fingerprint)
-    → Accept-Language (locale leak)
-    → Accept-Encoding (browser fingerprint)
-    → DNT (ironically identifies user)
-    → Referer (navigation history)
-    → Cookie (session tracking)
-    → X-Forwarded-For (real IP leak)
-    """
-
-    STRIP_REQUEST_HEADERS = {
-        "user-agent",
-        "accept-language",
-        "dnt",
-        "referer",
-        "origin",
-        "x-forwarded-for",
-        "x-real-ip",
-        "x-forwarded-host",
-        "x-forwarded-proto",
-        "forwarded",
-    }
-
-    async def dispatch(
-        self,
-        request: Request,
-        call_next: RequestResponseEndpoint
-    ) -> Response:
-
-        # Note: Starlette headers are immutable
-        # so we log stripped headers but
-        # can't modify them in place.
-        # The important stripping happens
-        # on the response side above.
-
-        response = await call_next(request)
-        return response
-
 
 # ═══════════════════════════════════════
 # TRAFFIC PADDING MIDDLEWARE
@@ -210,7 +156,7 @@ class TrafficPaddingMiddleware(
 
         # Add random padding header
         # Forces different packet sizes
-        pad_size = random.randint(8, 64)
+        pad_size = 32
         pad = "0" * pad_size
         response.headers["x-pad"] = pad
 
@@ -227,9 +173,6 @@ app.add_middleware(TrafficPaddingMiddleware)
 
 # Metadata stripping
 app.add_middleware(MetadataStripMiddleware)
-
-# Request sanitization
-app.add_middleware(RequestSanitizerMiddleware)
 
 # CORS
 app.add_middleware(
