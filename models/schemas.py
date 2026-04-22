@@ -32,8 +32,10 @@ class ChainStatus(BaseModel):
     wire_guard_latency_ms: int = 0
     proton_vpn_latency_ms: int = 0
 
-    # Fixed: use computed_field not @property
+    # @property is required with computed_field
+    # Without it → Pydantic v2 raises 422
     @computed_field
+    @property
     def total_latency_ms(self) -> int:
         return (
             self.open_vpn_latency_ms +
