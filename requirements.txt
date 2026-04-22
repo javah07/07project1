@@ -7,3 +7,5 @@ pyotp==2.9.0
 pydantic>=2.10.0
 bcrypt==4.2.0
 python-jose[cryptography]==3.3.0
+cryptography>=42.0.0
+a2wsgi>=1.10.0
