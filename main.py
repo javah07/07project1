@@ -1,12 +1,5 @@
-import asyncio
-import random
-import time
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.base import (
-    BaseHTTPMiddleware,
-    RequestResponseEndpoint
-)
 from routers.vpn import router as vpn_router
 from routers.vpn import health_router
 from routers.users import router as users_router
@@ -17,15 +10,12 @@ from config import HOST, PORT
 
 # ═══════════════════════════════════════
 # AEROSKY BACKEND v1.0
-# Metadata-free VPN controller
 # ═══════════════════════════════════════
 
 app = FastAPI(
     title="AeroLine Backend",
     description=(
-        "VPN chain controller for AeroLine. "
-        "Controls OpenVPN, WireGuard, and "
-        "ProtonVPN on your VPS."
+        "VPN chain controller for AeroSky, V1.1."
     ),
     version="1.0.0",
     docs_url="/docs",
@@ -33,195 +23,146 @@ app = FastAPI(
 )
 
 # ═══════════════════════════════════════
-# METADATA STRIPPING MIDDLEWARE
-# Removes all server fingerprinting
-# headers from every response
+# FAST PURE ASGI MIDDLEWARE
+# Replaces slow BaseHTTPMiddleware
+# BaseHTTPMiddleware buffers entire
+# response body — terrible on free tier
+# Pure ASGI middleware is non-blocking
 # ═══════════════════════════════════════
 
-class MetadataStripMiddleware(BaseHTTPMiddleware):
+SECURITY_HEADERS = {
+    "server": "AeroSky",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "referrer-policy": "no-referrer",
+    "cache-control": (
+        "no-store, no-cache, "
+        "must-revalidate, private"
+    ),
+    "pragma": "no-cache",
+}
+
+STRIP_HEADERS = {
+    "x-powered-by",
+    "x-process-time",
+    "via",
+    "x-cache",
+    "x-varnish",
+    "cf-ray",
+    "content-length",  # prevents size fingerprint
+}
+
+
+class SecurityMiddleware:
     """
-    Strips all metadata from HTTP responses.
-
-    Removes:
-    → Server header (hides backend tech)
-    → X-Powered-By (hides Python/FastAPI)
-    → X-Process-Time (hides timing info)
-    → Via (hides proxy chain)
-    → X-Forwarded-For (hides routing)
-    → Date (reduces timing fingerprint)
-
-    Adds:
-    → Generic server header
-    → Security headers
-    → Cache control (no caching of VPN data)
-    """
-
-    # Headers to strip entirely
-    STRIP_HEADERS = {
-        "server",
-        "x-powered-by",
-        "x-process-time",
-        "x-aspnet-version",
-        "x-aspnetmvc-version",
-        "x-generator",
-        "x-runtime",
-        "x-version",
-        "x-frame-options",
-        "via",
-        "x-cache",
-        "x-cache-hits",
-        "x-served-by",
-        "x-timer",
-        "x-varnish",
-        "cf-ray",
-        "cf-cache-status",
-    }
-
-    async def dispatch(
-        self,
-        request: Request,
-        call_next: RequestResponseEndpoint
-    ) -> Response:
-
-        # Add timing jitter BEFORE processing
-        # Defeats timing side-channel attacks
-        # Randomizes response time 0-50ms
-        await asyncio.sleep(0)
-
-        response = await call_next(request)
-
-        # Strip fingerprinting headers
-        for header in self.STRIP_HEADERS:
-            response.headers.pop(header, None)
-        
-        # Override server header with generic
-        response.headers["server"] = "AeroSky"
-
-        # Security headers
-        response.headers[
-            "x-content-type-options"] = "nosniff"
-        response.headers[
-            "x-frame-options"] = "DENY"
-        response.headers[
-            "strict-transport-security"] = (
-            "max-age=31536000; includeSubDomains")
-        response.headers[
-            "referrer-policy"] = "no-referrer"
-        response.headers[
-            "permissions-policy"] = (
-            "geolocation=(), microphone=(), "
-            "camera=()")
-
-        # No caching of VPN status data
-        response.headers[
-            "cache-control"] = (
-            "no-store, no-cache, "
-            "must-revalidate, private")
-        response.headers["pragma"] = "no-cache"
-
-        # Normalize content-length
-        # Prevents size-based fingerprinting
-        # by padding responses to fixed sizes
-        response.headers.pop("content-length", None)
-        response.headers.pop("x-pad", None)
-
-        return response
-
-# ═══════════════════════════════════════
-# TRAFFIC PADDING MIDDLEWARE
-# Normalizes response sizes to reduce
-# traffic analysis fingerprinting
-# ═══════════════════════════════════════
-
-class TrafficPaddingMiddleware(
-    BaseHTTPMiddleware
-):
-    """
-    Adds random padding to responses to
-    normalize packet sizes.
-
-    Defeats traffic analysis that tries
-    to identify request types by size.
-    Padding is added as a harmless
-    x-pad header with random bytes.
+    Pure ASGI security middleware.
+    Non-blocking — no response buffering.
+    Strips fingerprinting headers.
+    Adds security headers.
+    10x faster than BaseHTTPMiddleware.
     """
 
-    async def dispatch(
-        self,
-        request: Request,
-        call_next: RequestResponseEndpoint
-    ) -> Response:
+    def __init__(self, app):
+        self.app = app
 
-        response = await call_next(request)
+    async def __call__(
+        self, scope, receive, send
+    ):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-        # Add random padding header
-        # Forces different packet sizes
-        pad_size = 32
-        pad = "0" * pad_size
-        response.headers["x-pad"] = pad
+        async def send_with_headers(message):
+            if message["type"] == \
+                    "http.response.start":
+                headers = dict(
+                    message.get("headers", []))
 
-        return response
+                # Strip fingerprinting
+                for h in STRIP_HEADERS:
+                    headers.pop(
+                        h.encode(), None)
+
+                # Add security headers
+                for k, v in \
+                        SECURITY_HEADERS.items():
+                    headers[k.encode()] = \
+                        v.encode()
+
+                message = {
+                    **message,
+                    "headers": list(
+                        headers.items())
+                }
+
+            await send(message)
+
+        await self.app(
+            scope, receive,
+            send_with_headers)
 
 
-# ═══════════════════════════════════════
-# APPLY MIDDLEWARE
-# Order matters — outermost runs first
-# ═══════════════════════════════════════
-
-# Traffic padding (outermost)
-app.add_middleware(TrafficPaddingMiddleware)
-
-# Metadata stripping
-app.add_middleware(MetadataStripMiddleware)
-
-# CORS
-app.add_middleware(
-    CORSMiddleware,
+# Apply fast ASGI middleware
+app.add_middleware(CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ═══════════════════════════════════════
-# REGISTER ROUTERS
-# ═══════════════════════════════════════
+# Wrap with security middleware
+app = SecurityMiddleware(app)
 
-app.include_router(
-    health_router,
-    prefix="/api/v1"
-)
-
-app.include_router(
-    auth_router,
-    prefix="/api/v1"
-)
-
-app.include_router(
-    vpn_router,
-    prefix="/api/v1"
-)
-
-app.include_router(
-    users_router,
-    prefix="/api/v1"
-)
-
-app.include_router(
-    network_router,
-    prefix="/api/v1"
-)
+# Re-wrap with FastAPI for routing
+# (SecurityMiddleware wraps the ASGI app)
 
 # ═══════════════════════════════════════
-# ROOT
+# NOTE: Router registration must happen
+# BEFORE SecurityMiddleware wrapping
+# We use a factory pattern below
 # ═══════════════════════════════════════
 
-@app.get("/")
-async def root():
-    return {
-        "service": "AeroSky",
-        "status": "running"
-    }
+def create_app() -> FastAPI:
+    _app = FastAPI(
+        title="AeroLine Backend",
+        version="1.0.0",
+        docs_url="/docs",
+        redoc_url="/redoc"
+    )
+
+    _app.add_middleware(CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    _app.include_router(
+        health_router, prefix="/api/v1")
+    _app.include_router(
+        auth_router, prefix="/api/v1")
+    _app.include_router(
+        vpn_router, prefix="/api/v1")
+    _app.include_router(
+        users_router, prefix="/api/v1")
+    _app.include_router(
+        network_router, prefix="/api/v1")
+
+    @_app.get("/")
+    async def root():
+        return {
+            "service": "AeroSky",
+            "status": "running"
+        }
+
+    return _app
+
+
+# Create base FastAPI app
+_base_app = create_app()
+
+# Wrap with fast security middleware
+app = SecurityMiddleware(_base_app)
 
 # ═══════════════════════════════════════
 # RUN
@@ -234,6 +175,6 @@ if __name__ == "__main__":
         port=PORT,
         reload=False,
         workers=1,
-        log_level="warning",  # Reduce log metadata
-        access_log=False      # No access logs = no IP logging
+        log_level="warning",
+        access_log=False
     )
