@@ -1,34 +1,60 @@
 import os
-from fastapi import Header, HTTPException
-from jose import jwt
-from jose.exceptions import JWTError
-from auth.keys import get_public_key_pem
+from fastapi import Header, HTTPException, status
+from jose import jwt, JWTError
+from auth.keys import get_public_pem
 
-_AUDIENCE = os.getenv("AUDIENCE", "AeroSky")
+_JWT_ALGORITHM = "RS256"
+_AUDIENCE = os.getenv("AUDIENCE", "AeroLine")
 _ISSUER = (os.getenv("ISSUER") or "").rstrip("/")
 
 
-async def verify_token(authorization: str = Header(...)) -> str:
+async def verify_token(
+    authorization: str = Header(...)
+) -> bool:
     """
-    Verify RS256 Bearer token.
-    Returns username on success, raises HTTPException on failure.
+    Verify RS256 JWT Bearer token.
+
+    Tokens are signed with persistent
+    RSA private key on server.
+    Verified here with matching public key.
+
+    Both must use same key pair —
+    keys.py ensures this by persisting
+    the key pair to disk.
     """
     if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid authorization format")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authorization format"
+        )
 
-    token = authorization.replace("Bearer ", "")
+    token = authorization.removeprefix("Bearer ")
+
+    # Dev mode — no issuer configured
+    if not _ISSUER:
+        return True
 
     try:
-        pub_key = get_public_key_pem()
+        public_pem = get_public_pem()
+
         payload = jwt.decode(
             token,
-            pub_key,
-            algorithms=["RS256"],
+            public_pem,
+            algorithms=[_JWT_ALGORITHM],
             audience=_AUDIENCE,
             issuer=_ISSUER,
         )
+
         if payload.get("sub"):
-            return payload["sub"]
-        raise HTTPException(status_code=401, detail="Invalid token")
+            return True
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token"
+        )
+
     except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token"
+        )
