@@ -8,43 +8,15 @@ from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from jose import jwt
-from auth.keys import get_public_key_pem, _ensure_keys
+from auth.keys import get_private_key, get_public_key
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
-_JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
+_JWT_EXPIRE_MINUTES = int(
+    os.getenv("JWT_EXPIRE_MINUTES", "60"))
 _DB_PATH = os.getenv("DB_PATH", "/data/aero.db")
 _ISSUER = (os.getenv("ISSUER") or "").rstrip("/")
-_AUDIENCE = os.getenv("AUDIENCE", "AeroSky")
-
-
-def _sign(payload: dict) -> str:
-    _ensure_keys()
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.backends import default_backend
-    from auth.keys import _RSA_PRIVATE_KEY
-    pkey = _RSA_PRIVATE_KEY.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.TraditionalOpenSSL,
-        encryption_algorithm=serialization.NoEncryption()
-    )
-    pkey_loaded = serialization.load_pem_private_key(
-        pkey, password=None, backend=default_backend()
-    )
-    return jwt.encode(payload, pkey_loaded, algorithm="RS256")
-
-
-def _int_to_b64url(n: int) -> str:
-    byte_len = (n.bit_length() + 7) // 8
-    return base64.urlsafe_b64encode(
-        n.to_bytes(byte_len, "big")
-    ).rstrip(b"=").decode()
-
-
-# ═══════════════════════════════════════
-# RATE LIMITING
-# ═══════════════════════════════════════
+_AUDIENCE = os.getenv("AUDIENCE", "AeroLine")
 
 _rate_limit: dict = {}
 _RATE_WINDOW = 60
@@ -63,12 +35,10 @@ def _rate_check(ip: str) -> bool:
     return True
 
 
-# ═══════════════════════════════════════
-# DATABASE
-# ═══════════════════════════════════════
-
 def _get_db():
-    os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
+    os.makedirs(
+        os.path.dirname(_DB_PATH),
+        exist_ok=True)
     conn = sqlite3.connect(_DB_PATH)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS users ("
@@ -81,26 +51,39 @@ def _get_db():
     return conn
 
 
-# ═══════════════════════════════════════
-# SECURITY HEADERS
-# ═══════════════════════════════════════
+def _sign(payload: dict) -> str:
+    """
+    Sign JWT with PERSISTENT RSA private key.
+    Same key every time = tokens stay valid.
+    """
+    private_key = get_private_key()
 
-def _sanitize(response: Response):
-    response.headers["server"] = "AeroSky"
-    response.headers["x-content-type-options"] = "nosniff"
-    response.headers["x-frame-options"] = "DENY"
-    response.headers["strict-transport-security"] = "max-age=31536000"
-    response.headers["referrer-policy"] = "no-referrer"
-    response.headers["cache-control"] = "no-store, no-cache"
-    response.headers["pragma"] = "no-cache"
-    if "content-length" in response.headers:
-        del response.headers["content-length"]
-    if "x-pad" in response.headers:
-        del response.headers["x-pad"]
+    private_pem = private_key.private_bytes(
+        encoding=__import__('cryptography')
+            .hazmat.primitives.serialization
+            .Encoding.PEM,
+        format=__import__('cryptography')
+            .hazmat.primitives.serialization
+            .PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=__import__(
+            'cryptography')
+            .hazmat.primitives.serialization
+            .NoEncryption()
+    )
+
+    return jwt.encode(
+        payload, private_pem, algorithm="RS256")
+
+
+def _int_to_b64url(n: int) -> str:
+    byte_len = (n.bit_length() + 7) // 8
+    return base64.urlsafe_b64encode(
+        n.to_bytes(byte_len, "big")
+    ).rstrip(b"=").decode()
 
 
 # ═══════════════════════════════════════
-# REQUEST/RESPONSE MODELS
+# SCHEMAS
 # ═══════════════════════════════════════
 
 class RegisterRequest(BaseModel):
@@ -124,56 +107,44 @@ class TokenResponse(BaseModel):
 # ═══════════════════════════════════════
 
 @router.get("/.well-known/openid-configuration")
-async def oidc_discovery(response: Response):
-    _sanitize(response)
+async def oidc_discovery():
     if not _ISSUER:
-        raise HTTPException(status_code=500, detail="ISSUER env not set")
-    return JSONResponse(
-        content={
-            "issuer": _ISSUER,
-            "jwks_uri": f"{_ISSUER}/auth/jwks",
-            "authorization_endpoint": f"{_ISSUER}/auth/authorize",
-            "token_endpoint": f"{_ISSUER}/auth/login",
-            "userinfo_endpoint": f"{_ISSUER}/auth/userinfo",
-            "response_types_supported": ["code", "token"],
-            "subject_types_supported": ["public"],
-            "id_token_signing_alg_values_supported": ["RS256"],
-            "scopes_supported": ["openid", "profile"],
-            "token_endpoint_auth_methods_supported": ["client_secret_basic"],
-            "claims_supported": [
-                "sub", "iss", "aud", "exp", "iat",
-                "username", "email"
-            ],
-        },
-        media_type="application/json",
-    )
+        raise HTTPException(
+            status_code=500,
+            detail="ISSUER env not set")
+    return JSONResponse(content={
+        "issuer": _ISSUER,
+        "jwks_uri": f"{_ISSUER}/api/v1/auth/jwks",
+        "token_endpoint": f"{_ISSUER}/api/v1/auth/login",
+        "response_types_supported": ["token"],
+        "subject_types_supported": ["public"],
+        "id_token_signing_alg_values_supported":
+            ["RS256"],
+    })
 
 
 # ═══════════════════════════════════════
-# JWKS
+# JWKS — uses SAME persistent public key
+# that tokens are signed with
 # ═══════════════════════════════════════
 
 @router.get("/jwks")
-async def jwks(response: Response):
-    _sanitize(response)
-    _ensure_keys()
-    from auth.keys import _RSA_PUBLIC_KEY
-    rsa_key = _RSA_PUBLIC_KEY.public_numbers()
-    return JSONResponse(
-        content={
-            "keys": [
-                {
-                    "kty": "RSA",
-                    "use": "sig",
-                    "kid": "1",
-                    "alg": "RS256",
-                    "n": _int_to_b64url(rsa_key.n),
-                    "e": _int_to_b64url(rsa_key.e),
-                }
-            ]
-        },
-        media_type="application/json",
-    )
+async def jwks():
+    """
+    Returns the persistent public key.
+    Matches the private key used to sign tokens.
+    """
+    pub = get_public_key().public_numbers()
+    return JSONResponse(content={
+        "keys": [{
+            "kty": "RSA",
+            "use": "sig",
+            "kid": "aerosky-1",
+            "alg": "RS256",
+            "n": _int_to_b64url(pub.n),
+            "e": _int_to_b64url(pub.e),
+        }]
+    })
 
 
 # ═══════════════════════════════════════
@@ -183,51 +154,48 @@ async def jwks(response: Response):
 @router.post(
     "/register",
     response_model=TokenResponse,
-    responses={
-        400: {"description": "Username taken or invalid"},
-        429: {"description": "Rate limited"},
-    },
 )
-async def register(body: RegisterRequest, response: Response):
-    _sanitize(response)
+async def register(body: RegisterRequest):
     username = body.username.strip().lower()
     password = body.password
 
-    if not username or len(username) < 3 or len(username) > 32:
-        raise HTTPException(status_code=400, detail="Invalid username")
+    if not username or \
+            len(username) < 3 or \
+            len(username) > 32:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid username")
     if not password or len(password) < 8:
-        raise HTTPException(status_code=400, detail="Invalid password")
+        raise HTTPException(
+            status_code=400,
+            detail="Password too short")
     if not _ISSUER:
-        raise HTTPException(status_code=500, detail="ISSUER env not set")
+        raise HTTPException(
+            status_code=500,
+            detail="ISSUER env not set")
 
-    pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    pw_hash = bcrypt.hashpw(
+        password.encode(),
+        bcrypt.gensalt()
+    ).decode()
 
     try:
         conn = _get_db()
         conn.execute(
-            "INSERT INTO users (username, password_hash, created) VALUES (?, ?, ?)",
-            (username, pw_hash, datetime.utcnow().isoformat()),
+            "INSERT INTO users "
+            "(username, password_hash, created) "
+            "VALUES (?, ?, ?)",
+            (username, pw_hash,
+             datetime.utcnow().isoformat()),
         )
         conn.commit()
         conn.close()
     except sqlite3.IntegrityError:
-        raise HTTPException(status_code=400, detail="Username taken")
+        raise HTTPException(
+            status_code=400,
+            detail="Username taken")
 
-    now = datetime.utcnow()
-    payload = {
-        "sub": username,
-        "iss": _ISSUER,
-        "aud": _AUDIENCE,
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=_JWT_EXPIRE_MINUTES)).timestamp()),
-        "username": username,
-    }
-    token = _sign(payload)
-
-    return TokenResponse(
-        access_token=token,
-        expires_in=_JWT_EXPIRE_MINUTES * 60,
-    )
+    return _issue_token(username)
 
 
 # ═══════════════════════════════════════
@@ -237,40 +205,48 @@ async def register(body: RegisterRequest, response: Response):
 @router.post(
     "/login",
     response_model=TokenResponse,
-    responses={
-        401: {"description": "Invalid credentials"},
-        429: {"description": "Rate limited"},
-    },
 )
-async def login(body: LoginRequest, response: Response):
-    _sanitize(response)
+async def login(body: LoginRequest):
     username = body.username.strip().lower()
     password = body.password
 
     if not _ISSUER:
-        raise HTTPException(status_code=500, detail="ISSUER env not set")
+        raise HTTPException(
+            status_code=500,
+            detail="ISSUER env not set")
 
     conn = _get_db()
     row = conn.execute(
-        "SELECT password_hash FROM users WHERE username = ?",
+        "SELECT password_hash FROM users "
+        "WHERE username = ?",
         (username,),
     ).fetchone()
     conn.close()
 
-    if not row or not bcrypt.checkpw(password.encode(), row[0].encode()):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not row or not bcrypt.checkpw(
+            password.encode(),
+            row[0].encode()):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid credentials")
 
+    return _issue_token(username)
+
+
+def _issue_token(username: str) -> TokenResponse:
     now = datetime.utcnow()
     payload = {
         "sub": username,
         "iss": _ISSUER,
         "aud": _AUDIENCE,
         "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=_JWT_EXPIRE_MINUTES)).timestamp()),
+        "exp": int((
+            now + timedelta(
+                minutes=_JWT_EXPIRE_MINUTES)
+        ).timestamp()),
         "username": username,
     }
     token = _sign(payload)
-
     return TokenResponse(
         access_token=token,
         expires_in=_JWT_EXPIRE_MINUTES * 60,
@@ -282,6 +258,5 @@ async def login(body: LoginRequest, response: Response):
 # ═══════════════════════════════════════
 
 @router.get("/health")
-async def auth_health(response: Response):
-    _sanitize(response)
+async def auth_health():
     return {"status": "ok"}
