@@ -13,6 +13,7 @@ DOMAIN="aerosky.duckdns.org"
 EMAIL="admin@$DOMAIN"
 DUCK_TOKEN="${DUCKDNS_TOKEN:-}"
 DUCK_TOKEN_FILE="/root/.duckdns_token"
+DUCK_SUBDOMAIN="${DOMAIN%%.duckdns.org}"
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -58,16 +59,28 @@ if ! id "$APP_USER" &>/dev/null; then
 fi
 
 # ───────────── CODE ─────────────
-if [ ! -d "$DEPLOY_DIR/.git" ]; then
-  retry git clone "$REP_URL" "$DEPLOY_DIR"
-else
+if [ -d "$DEPLOY_DIR/.git" ]; then
+  # Prevent "dubious ownership" failures when running installer as root
+  git config --global --add safe.directory "$DEPLOY_DIR" || true
   cd "$DEPLOY_DIR"
   retry git fetch --all
   retry git reset --hard origin/main
+elif [ -d "$DEPLOY_DIR" ] && [ -n "$(find "$DEPLOY_DIR" -mindepth 1 -maxdepth 1 2>/dev/null)" ]; then
+  echo "⚠️ $DEPLOY_DIR exists and is not a git repo."
+  echo "   Backing it up and cloning a fresh copy."
+  BACKUP_DIR="${DEPLOY_DIR}.bak.$(date +%Y%m%d%H%M%S)"
+  mv "$DEPLOY_DIR" "$BACKUP_DIR"
+  retry git clone "$REP_URL" "$DEPLOY_DIR"
+else
+  mkdir -p "$DEPLOY_DIR"
+  retry git clone "$REP_URL" "$DEPLOY_DIR"
 fi
 
 # OPTIONAL: pin commit
 # git checkout <commit>
+
+# Ensure app user can create venv and write runtime files
+chown -R "$APP_USER":"$APP_USER" "$DEPLOY_DIR"
 
 # ───────────── PERMS ─────────────
 mkdir -p /etc/aerosky/keys
@@ -121,14 +134,17 @@ DUCK_SCRIPT="/usr/local/bin/duckdns_update.sh"
 cat > "$DUCK_SCRIPT" <<EOF
 #!/bin/bash
 TOKEN=\$(cat $DUCK_TOKEN_FILE)
-curl -sS "https://www.duckdns.org/update?domains=$DOMAIN&token=\$TOKEN&ip=" -o /var/log/duckdns.log
+curl -fsS "https://www.duckdns.org/update?domains=$DUCK_SUBDOMAIN&token=\$TOKEN&ip=" -o /var/log/duckdns.log
 EOF
 
 chmod 700 "$DUCK_SCRIPT"
 
 (crontab -l 2>/dev/null | grep -Fv "$DUCK_SCRIPT"; echo "*/5 * * * * $DUCK_SCRIPT") | crontab -
 
-bash "$DUCK_SCRIPT"
+if ! bash "$DUCK_SCRIPT"; then
+  echo "⚠️ DuckDNS update failed (check token/domain/network)."
+  echo "   Continuing deployment; review /var/log/duckdns.log."
+fi
 
 # ───────────── SYSCTL ─────────────
 grep -q "^net.ipv4.ip_forward=1" /etc/sysctl.conf || echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
