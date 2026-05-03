@@ -96,6 +96,17 @@ ExecStart=$VENV_DIR/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 
 Restart=always
 RestartSec=5
 
+# Systemd sandboxing/hardening (recommended best effort)
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=true
+PrivateDevices=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadOnlyPaths=/etc /usr /opt
+
 [Install]
 WantedBy=multi-user.target
 EOF
