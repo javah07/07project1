@@ -1,8 +1,10 @@
 import subprocess
 import os
 import asyncio
+import logging
 from typing import Optional
 from config import OPENVPN_CONFIG, CLIENTS_DIR
+logger = logging.getLogger(__name__)
 
 
 class OpenVpnService:
@@ -24,43 +26,46 @@ class OpenVpnService:
     async def start(self) -> bool:
         """Start OpenVPN server service"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["systemctl", "start", "openvpn"],
                 capture_output=True,
                 text=True,
                 timeout=30
             )
             return result.returncode == 0
-        except Exception as e:
-            print(f"OpenVPN start error: {e}")
+        except Exception:
+            logger.exception("OpenVPN start error")
             return False
 
     async def stop(self) -> bool:
         """Stop OpenVPN server service"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["systemctl", "stop", "openvpn"],
                 capture_output=True,
                 text=True,
                 timeout=30
             )
             return result.returncode == 0
-        except Exception as e:
-            print(f"OpenVPN stop error: {e}")
+        except Exception:
+            logger.exception("OpenVPN stop error")
             return False
 
     async def restart(self) -> bool:
         """Restart OpenVPN server service"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["systemctl", "restart", "openvpn"],
                 capture_output=True,
                 text=True,
                 timeout=30
             )
             return result.returncode == 0
-        except Exception as e:
-            print(f"OpenVPN restart error: {e}")
+        except Exception:
+            logger.exception("OpenVPN restart error")
             return False
 
     # ═══════════════════════════════════
@@ -120,8 +125,8 @@ class OpenVpnService:
                             if len(parts) > 4 else ""
                         })
 
-        except Exception as e:
-            print(f"Error reading OpenVPN status: {e}")
+        except Exception:
+            logger.exception("Error reading OpenVPN status")
 
         return clients
 
