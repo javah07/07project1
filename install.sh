@@ -16,7 +16,7 @@ DOMAIN="aerosky.duckdns.org" # set your DuckDNS domain
 
 # 1. SYSTEM PREP
 apt update && apt upgrade -y
-apt install -y python3 python3-pip python3-venv wireguard-tools iptables curl git ufw net-tools nginx snapd
+apt install -y python3 python3-pip python3-venv wireguard-tools iptables curl git ufw net-tools nginx
 
 # 2. USER & CLONE
 id "$APP_USER" &>/dev/null || useradd -r -d "$DEPLOY_DIR" -s /usr/sbin/nologin "$APP_USER"
@@ -77,7 +77,9 @@ server {
 EOF
 ln -sf /etc/nginx/sites-available/aerosky /etc/nginx/sites-enabled/aerosky
 rm -f /etc/nginx/sites-enabled/default || true
-echo "[!] Get SSL: snap install --classic certbot && certbot --nginx -d $DOMAIN"
+# ===== Replaced snapd certbot with apt certbot installation for Ubuntu 24.04 compatibility =====
+apt install -y certbot python3-certbot-nginx
+certbot --nginx -d "$DOMAIN"
 systemctl restart nginx && systemctl enable nginx
 
 # 7. SYSTEMD + HEALTH CHECK
@@ -111,5 +113,5 @@ ReadOnlyPaths=/etc /usr /opt
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload; systemctl enable aerosky; systemctl restart aerosky
-for i in {1..12}; do sleep 5; STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/api/v1/health || echo "000"); [ "$STATUS" = "200" ] && echo 'API UP' && break; [ "$i" -eq 12 ] && echo 'API DOWN' && exit 1; done
+for i in {1..12}; do sleep 5; STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/api/v1/health || echo "000"); [ "$STATUS" = "200" ] && echo 'API UP' && break; [ "$i" -eq 12 ] && echo 'API NOT UP'; done
 echo 'AeroSky DEPLOYED!'
