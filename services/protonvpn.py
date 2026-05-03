@@ -44,6 +44,7 @@ class ProtonVpnService:
             # Connect to specified server/country
             result = await asyncio.to_thread(
                 self._run,
+                subprocess.run,
                 [
                     "protonvpn-cli",
                     "connect",
@@ -66,6 +67,7 @@ class ProtonVpnService:
         try:
             result = await asyncio.to_thread(
                 self._run,
+                subprocess.run,
                 ["protonvpn-cli", "disconnect"],
                 timeout=30
             )
@@ -79,6 +81,7 @@ class ProtonVpnService:
         try:
             result = await asyncio.to_thread(
                 self._run,
+                subprocess.run,
                 ["protonvpn-cli", "reconnect"],
                 timeout=60
             )

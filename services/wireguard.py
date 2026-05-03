@@ -26,6 +26,7 @@ class WireGuardService:
         try:
             result = await asyncio.to_thread(
                 self._run,
+                subprocess.run,
                 ["wg-quick", "up", WG_INTERFACE],
                 timeout=30
             )
@@ -39,6 +40,7 @@ class WireGuardService:
         try:
             result = await asyncio.to_thread(
                 self._run,
+                subprocess.run,
                 ["wg-quick", "down", WG_INTERFACE],
                 timeout=30
             )
