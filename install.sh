@@ -12,7 +12,7 @@ REP_URL="https://github.com/javah07/07project1.git"
 SERVICE_FILE="/etc/systemd/system/aerosky.service"
 ENV_FILE="$DEPLOY_DIR/.env"
 ENV_EXAMPLE="$DEPLOY_DIR/.env.example"
-DOMAIN="yourduckdnsdomain.duckdns.org" # set your DuckDNS domain
+DOMAIN="aerosky.duckdns.org" # set your DuckDNS domain
 
 # 1. SYSTEM PREP
 apt update && apt upgrade -y
