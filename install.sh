@@ -58,7 +58,7 @@ server {
     add_header Referrer-Policy no-referrer;
     add_header Content-Security-Policy "default-src 'self';" always;
     client_max_body_size 8M;
-    limit_req_zone $binary_remote_addr zone=aerosky:10m rate=20r/s;
+    # limit_req_zone directive moved to nginx.conf http block, as required by nginx
     limit_req   zone=aerosky burst=20;
     location / {
         proxy_pass http://127.0.0.1:8000;
@@ -81,6 +81,13 @@ rm -f /etc/nginx/sites-enabled/default || true
 apt install -y certbot python3-certbot-nginx
 certbot --nginx -d "$DOMAIN"
 systemctl restart nginx && systemctl enable nginx
+
+# Inform user to add limit_req_zone to nginx.conf http block
+if ! grep -q 'limit_req_zone $binary_remote_addr zone=aerosky:' /etc/nginx/nginx.conf; then
+    echo "[!] Please add the following line inside the http { } block of /etc/nginx/nginx.conf before continuing:"
+    echo "    limit_req_zone \$binary_remote_addr zone=aerosky:10m rate=20r/s;"
+    echo "Then run: sudo nginx -t && sudo systemctl reload nginx"
+fi
 
 # 7. SYSTEMD + HEALTH CHECK
 cat > "$SERVICE_FILE" <<EOF
