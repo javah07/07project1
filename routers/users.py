@@ -65,8 +65,9 @@ async def get_connected_users():
         last_handshake = peer.get(
             "latest_handshake", ""
         )
-        if last_handshake and "minute" in (
-            last_handshake.lower()
+        if last_handshake and any(
+            unit in last_handshake.lower()
+            for unit in ("second", "minute", "hour")
         ):
             users.append(ConnectedUser(
                 display_name=f"WG Peer",

@@ -58,16 +58,26 @@ if ! id "$APP_USER" &>/dev/null; then
 fi
 
 # ───────────── CODE ─────────────
-if [ ! -d "$DEPLOY_DIR/.git" ]; then
-  retry git clone "$REP_URL" "$DEPLOY_DIR"
-else
+if [ -d "$DEPLOY_DIR/.git" ]; then
   cd "$DEPLOY_DIR"
   retry git fetch --all
   retry git reset --hard origin/main
+elif [ -d "$DEPLOY_DIR" ] && [ -n "$(find "$DEPLOY_DIR" -mindepth 1 -maxdepth 1 2>/dev/null)" ]; then
+  echo "⚠️ $DEPLOY_DIR exists and is not a git repo."
+  echo "   Backing it up and cloning a fresh copy."
+  BACKUP_DIR="${DEPLOY_DIR}.bak.$(date +%Y%m%d%H%M%S)"
+  mv "$DEPLOY_DIR" "$BACKUP_DIR"
+  retry git clone "$REP_URL" "$DEPLOY_DIR"
+else
+  mkdir -p "$DEPLOY_DIR"
+  retry git clone "$REP_URL" "$DEPLOY_DIR"
 fi
 
 # OPTIONAL: pin commit
 # git checkout <commit>
+
+# Ensure app user can create venv and write runtime files
+chown -R "$APP_USER":"$APP_USER" "$DEPLOY_DIR"
 
 # ───────────── PERMS ─────────────
 mkdir -p /etc/aerosky/keys
