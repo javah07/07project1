@@ -1,160 +1,104 @@
 #!/bin/bash
-# ═══════════════════════════════════════
-# AeroSky Backend Setup Script
-# For Ubuntu Server 22.04+ on RPi 4
-# or any amd64/arm64 VPS
-#
-# Usage: sudo bash install.sh
-# ═══════════════════════════════════════
-
 set -e
+# ───────────── AeroSky Backend Hardened Install ─────────────
+# Usage: sudo bash install.sh
+# Ubuntu 22.04/24.04 | HTTPS via DuckDNS+Let's Encrypt | Hardened
 
-echo "════════════════════════════════"
-echo "  AeroSky Backend Setup"
-echo "════════════════════════════════"
-
-# ═══════════════════════════════════════
-# STEP 1 — System Update
-# ═══════════════════════════════════════
-echo ""
-echo "[1/8] Updating system..."
-apt update && apt upgrade -y
-
-# ═══════════════════════════════════════
-# STEP 2 — Install Core Dependencies
-# ═══════════════════════════════════════
-echo ""
-echo "[2/8] Installing dependencies..."
-apt install -y \
-    python3 \
-    python3-pip \
-    python3-venv \
-    wireguard-tools \
-    iptables \
-    curl \
-    wget \
-    git \
-    ufw \
-    net-tools
-
-# ═══════════════════════════════════════
-# STEP 3 — Clone / Deploy Backend
-# ═══════════════════════════════════════
-echo ""
-echo "[3/8] Deploying AeroSky backend..."
+# 0. VARS
+APP_USER="aerosky"
 DEPLOY_DIR="/opt/aerosky"
+VENV_DIR="$DEPLOY_DIR/venv"
+REP_URL="https://github.com/javah07/07project1.git"
+SERVICE_FILE="/etc/systemd/system/aerosky.service"
+ENV_FILE="$DEPLOY_DIR/.env"
+ENV_EXAMPLE="$DEPLOY_DIR/.env.example"
+DOMAIN="yourduckdnsdomain.duckdns.org" # set your DuckDNS domain
 
-if [ -d "$DEPLOY_DIR" ]; then
-    echo "  Backend already exists at $DEPLOY_DIR"
-    echo "  Pulling latest changes..."
-    cd "$DEPLOY_DIR" && git pull
-else
-    echo "  Cloning repo..."
-    mkdir -p "$DEPLOY_DIR"
-    # Replace with your actual repo URL
-    # git clone https://github.com/YOUR_USERNAME/AeroLine-Backend.git "$DEPLOY_DIR"
-    echo "  NOTE: Clone your repo manually into $DEPLOY_DIR"
-    echo "  Then re-run this script, or copy files manually."
+# 1. SYSTEM PREP
+apt update && apt upgrade -y
+apt install -y python3 python3-pip python3-venv wireguard-tools iptables curl git ufw net-tools nginx snapd
+
+# 2. USER & CLONE
+id "$APP_USER" &>/dev/null || useradd -r -d "$DEPLOY_DIR" -s /usr/sbin/nologin "$APP_USER"
+if [ ! -d "$DEPLOY_DIR/.git" ]; then
+    rm -rf "$DEPLOY_DIR"
+    git clone "$REP_URL" "$DEPLOY_DIR"
 fi
+cd "$DEPLOY_DIR" && git pull
+chown -R "$APP_USER":root "$DEPLOY_DIR"
 
-# ═══════════════════════════════════════
-# STEP 4 — Python Environment
-# ═══════════════════════════════════════
-echo ""
-echo "[4/8] Setting up Python environment..."
-cd "$DEPLOY_DIR"
-python3 -m venv venv
-source venv/bin/activate
+# 3. PYTHON ENV
+[ -d "$VENV_DIR" ] || python3 -m venv "$VENV_DIR"
+source "$VENV_DIR/bin/activate"
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# ═══════════════════════════════════════
-# STEP 5 — Environment Variables
-# ═══════════════════════════════════════
-echo ""
-echo "[5/8] Configuring environment..."
-if [ ! -f "$DEPLOY_DIR/.env" ]; then
-    cp "$DEPLOY_DIR/.env.example" "$DEPLOY_DIR/.env"
-    echo "  Created .env from template — fill it in before starting!"
-    echo "  Edit: nano $DEPLOY_DIR/.env"
-else
-    echo "  .env already exists"
-fi
+# 4. SECRETS & PERM
+[ -f "$ENV_FILE" ] || (cp "$ENV_EXAMPLE" "$ENV_FILE" && echo 'Fill out .env now!')
+chmod 600 "$ENV_FILE"; chown "$APP_USER":root "$ENV_FILE"
+mkdir -p /etc/aerosky/keys; chmod 700 /etc/aerosky/keys; chown root:root /etc/aerosky/keys
 
-mkdir -p /etc/aerosky/keys
-chmod 700 /etc/aerosky/keys
-
-# ═══════════════════════════════════════
-# STEP 6 — Firewall
-# ═══════════════════════════════════════
-echo ""
-echo "[6/8] Configuring firewall..."
-ufw default deny incoming
-ufw default allow outgoing
-ufw allow ssh
-ufw allow 8000/tcp    # AeroSky API
-ufw allow 51820/udp    # WireGuard
-ufw --force enable
-echo "  Firewall configured."
-
-# ═══════════════════════════════════════
-# STEP 7 — IP Forwarding
-# ═══════════════════════════════════════
-echo ""
-echo "[7/8] Enabling IP forwarding..."
-echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-echo "net.ipv6.conf.all.forwarding=1" >> /etc/sysctl.conf
+# 5. FIREWALL & SYSCTL
+ufw --force reset; ufw default deny incoming; ufw default allow outgoing
+ufw allow ssh; ufw allow 51820/udp; ufw allow 'Nginx Full'; ufw --force enable
+grep -qxF 'net.ipv4.ip_forward=1' /etc/sysctl.conf || echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+grep -qxF 'net.ipv6.conf.all.forwarding=1' /etc/sysctl.conf || echo 'net.ipv6.conf.all.forwarding=1' >> /etc/sysctl.conf
 sysctl -p
-echo "  IP forwarding enabled."
 
-# ═══════════════════════════════════════
-# STEP 8 — Systemd Service
-# ═══════════════════════════════════════
-echo ""
-echo "[8/8] Creating systemd service..."
-cat > /etc/systemd/system/aerosky.service << EOF
+# 6. NGINX SSL REVERSE PROXY
+cat > /etc/nginx/sites-available/aerosky <<EOF
+server {
+    listen 443 ssl http2;
+    server_name $DOMAIN;
+    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy no-referrer;
+    add_header Content-Security-Policy "default-src 'self';" always;
+    client_max_body_size 8M;
+    limit_req_zone $binary_remote_addr zone=aerosky:10m rate=20r/s;
+    limit_req   zone=aerosky burst=20;
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+    }
+}
+server {
+    listen 80;
+    server_name $DOMAIN;
+    return 301 https://$host$request_uri;
+}
+EOF
+ln -sf /etc/nginx/sites-available/aerosky /etc/nginx/sites-enabled/aerosky
+rm -f /etc/nginx/sites-enabled/default || true
+echo "[!] Get SSL: snap install --classic certbot && certbot --nginx -d $DOMAIN"
+systemctl restart nginx && systemctl enable nginx
+
+# 7. SYSTEMD + HEALTH CHECK
+cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=AeroSky VPN Backend
+Description=AeroSky Backend (Hardened Uvicorn FastAPI)
 After=network.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=${DEPLOY_DIR}
-Environment=PATH=${DEPLOY_DIR}/venv/bin
+User=$APP_USER
+WorkingDirectory=$DEPLOY_DIR
+Environment=PATH=$VENV_DIR/bin
 Environment=PYTHONUNBUFFERED=1
-ExecStart=${DEPLOY_DIR}/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
+ExecStart=$VENV_DIR/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
-systemctl daemon-reload
-systemctl enable aerosky
-
-echo ""
-echo "════════════════════════════════"
-echo "  Installation Complete!"
-echo "════════════════════════════════"
-echo ""
-echo "Next steps:"
-echo "1. Edit .env: nano $DEPLOY_DIR/.env"
-echo "   - Set ISSUER to your server's public IP or domain"
-echo "   - Set DB_PATH to '$DEPLOY_DIR/aero.db'"
-echo ""
-echo "2. Add your WireGuard config:"
-echo "   sudo cp your-wg.conf /etc/wireguard/wg0.conf"
-echo "   sudo wg-quick up wg0"
-echo ""
-echo "3. Start the backend:"
-echo "   sudo systemctl start aerosky"
-echo "   sudo systemctl status aerosky"
-echo ""
-echo "4. Check logs:"
-echo "   journalctl -u aerosky -f"
-echo ""
-echo "API available at: http://YOUR_IP:8000"
-echo "Docs at:          http://YOUR_IP:8000/docs"
-echo ""
+systemctl daemon-reload; systemctl enable aerosky; systemctl restart aerosky
+for i in {1..12}; do sleep 5; STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/api/v1/health || echo "000"); [ "$STATUS" = "200" ] && echo 'API UP' && break; [ "$i" -eq 12 ] && echo 'API DOWN' && exit 1; done
+echo 'AeroSky DEPLOYED!'
