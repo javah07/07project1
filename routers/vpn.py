@@ -5,6 +5,7 @@ import time
 import base64
 import struct
 import os
+import logging
 from datetime import datetime, timedelta
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.ec import (
@@ -39,6 +40,7 @@ router = APIRouter(
 openvpn = OpenVpnService()
 wireguard = WireGuardService()
 protonvpn = ProtonVpnService()
+logger = logging.getLogger(__name__)
 
 _current_protocol = VpnProtocol.full_chain
 _kill_switch_enabled = True
@@ -203,10 +205,15 @@ async def key_exchange(
 
     except HTTPException:
         raise
-    except Exception:
+    except (ValueError, TypeError, struct.error):
         raise HTTPException(
             status_code=400,
             detail="Key exchange failed")
+    except Exception as exc:
+        logger.exception("Unhandled key exchange error: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal key exchange error")
 
 # ═══════════════════════════════════════
 # VPN STATUS

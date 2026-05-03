@@ -90,15 +90,14 @@ async def _get_country_anonymously(
             headers=_ANON_HEADERS,
             follow_redirects=False
         ) as client:
-            # Use ip-api.com — no API key needed
+            # Use ipwho.is over HTTPS — no API key needed
             # Only send IP, nothing else
             r = await client.get(
-                f"http://ip-api.com/json/{ip}"
-                f"?fields=country,city,status"
+                f"https://ipwho.is/{ip}"
             )
             if r.status_code == 200:
                 data = r.json()
-                if data.get("status") == "success":
+                if data.get("success") is True:
                     return (
                         data.get("country", "Unknown"),
                         data.get("city", "Unknown")
