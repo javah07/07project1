@@ -49,6 +49,9 @@ class OpenVpnService:
             result = await asyncio.to_thread(
                 subprocess.run,
                 ["systemctl", "start", self._service_name],
+                ["systemctl", "start", "openvpn"],
+                capture_output=True,
+                text=True,
                 timeout=30
             )
             return result.returncode == 0
@@ -62,6 +65,9 @@ class OpenVpnService:
             result = await asyncio.to_thread(
                 subprocess.run,
                 ["systemctl", "stop", self._service_name],
+                ["systemctl", "stop", "openvpn"],
+                capture_output=True,
+                text=True,
                 timeout=30
             )
             return result.returncode == 0
@@ -75,6 +81,9 @@ class OpenVpnService:
             result = await asyncio.to_thread(
                 subprocess.run,
                 ["systemctl", "restart", self._service_name],
+                ["systemctl", "restart", "openvpn"],
+                capture_output=True,
+                text=True,
                 timeout=30
             )
             return result.returncode == 0
