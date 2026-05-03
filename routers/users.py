@@ -20,7 +20,6 @@ router = APIRouter(
 openvpn = OpenVpnService()
 wireguard = WireGuardService()
 
-
 # ═══════════════════════════════════════
 # GET CONNECTED USERS
 # ═══════════════════════════════════════
@@ -92,7 +91,6 @@ async def get_connected_users():
 
     return users
 
-
 # ═══════════════════════════════════════
 # GENERATE CLIENT CONFIG
 # ═══════════════════════════════════════
@@ -108,7 +106,7 @@ async def generate_client_config(
     """
     # Get server's public address
     server_address = os.getenv(
-        "SERVER_ADDRESS", "your-server.duckdns.org"
+        "SERVER_ADDRESS", "aerosky.duckdns.org"
     )
 
     config = openvpn.generate_client_config(
@@ -126,7 +124,6 @@ async def generate_client_config(
         )
 
     return config
-
 
 # ═══════════════════════════════════════
 # REVOKE CLIENT
@@ -162,11 +159,9 @@ async def revoke_client(client_id: str):
         else "Revocation failed"
     )
 
-
 # ═══════════════════════════════════════
 # HELPERS
 # ═══════════════════════════════════════
-
 def _format_duration(
     connected_since: str
 ) -> str:
