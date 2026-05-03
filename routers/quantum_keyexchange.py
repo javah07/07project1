@@ -22,7 +22,9 @@ import struct
 import hashlib
 import hmac
 import os
+import logging
 from datetime import datetime
+logger = logging.getLogger(__name__)
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.ec import (
@@ -170,8 +172,9 @@ async def quantum_key_exchange(request: dict) -> dict:
             # Still strong, not quantum resistant
             kyber_ciphertext = os.urandom(32)
             kyber_shared_secret = os.urandom(32)
-            print("WARNING: Kyber not available, "
-                  "using ECDH fallback")
+            logger.warning(
+                "Kyber not available, using ECDH fallback"
+            )
 
         # ─── ECDH P-384 KEY AGREEMENT ────────────
         # Generate server ephemeral ECDH key
