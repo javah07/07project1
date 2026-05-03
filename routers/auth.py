@@ -4,10 +4,11 @@ import bcrypt
 import time
 import base64
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Response, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from jose import jwt
+from cryptography.hazmat.primitives import serialization
 from auth.keys import get_private_key, get_public_key
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -59,16 +60,9 @@ def _sign(payload: dict) -> str:
     private_key = get_private_key()
 
     private_pem = private_key.private_bytes(
-        encoding=__import__('cryptography')
-            .hazmat.primitives.serialization
-            .Encoding.PEM,
-        format=__import__('cryptography')
-            .hazmat.primitives.serialization
-            .PrivateFormat.TraditionalOpenSSL,
-        encryption_algorithm=__import__(
-            'cryptography')
-            .hazmat.primitives.serialization
-            .NoEncryption()
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption()
     )
 
     return jwt.encode(
@@ -155,7 +149,13 @@ async def jwks():
     "/register",
     response_model=TokenResponse,
 )
-async def register(body: RegisterRequest):
+async def register(body: RegisterRequest, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    if not _rate_check(client_ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests")
+
     username = body.username.strip().lower()
     password = body.password
 
@@ -206,7 +206,13 @@ async def register(body: RegisterRequest):
     "/login",
     response_model=TokenResponse,
 )
-async def login(body: LoginRequest):
+async def login(body: LoginRequest, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    if not _rate_check(client_ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests")
+
     username = body.username.strip().lower()
     password = body.password
 
