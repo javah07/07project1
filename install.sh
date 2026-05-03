@@ -76,6 +76,9 @@ fi
 # OPTIONAL: pin commit
 # git checkout <commit>
 
+# Ensure app user can create venv and write runtime files
+chown -R "$APP_USER":"$APP_USER" "$DEPLOY_DIR"
+
 # ───────────── PERMS ─────────────
 mkdir -p /etc/aerosky/keys
 chown -R "$APP_USER":"$APP_USER" /etc/aerosky
