@@ -1,8 +1,10 @@
 import subprocess
 import os
 import asyncio
+import logging
 from typing import Optional
 from config import OPENVPN_CONFIG, CLIENTS_DIR
+logger = logging.getLogger(__name__)
 
 
 class OpenVpnService:
@@ -16,6 +18,26 @@ class OpenVpnService:
         self._process: Optional[
             asyncio.subprocess.Process
         ] = None
+        self._service_name = os.getenv(
+            "OPENVPN_SERVICE_NAME", "openvpn"
+        )
+
+    @staticmethod
+    def _run(
+        cmd: list[str],
+        timeout: int = 30,
+        text: bool = True,
+        input_data=None,
+        cwd: Optional[str] = None
+    ) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=text,
+            timeout=timeout,
+            input=input_data,
+            cwd=cwd
+        )
 
     # ═══════════════════════════════════
     # SERVICE CONTROL
@@ -24,43 +46,40 @@ class OpenVpnService:
     async def start(self) -> bool:
         """Start OpenVPN server service"""
         try:
-            result = subprocess.run(
-                ["systemctl", "start", "openvpn"],
-                capture_output=True,
-                text=True,
+            result = await asyncio.to_thread(
+                subprocess.run,
+                ["systemctl", "start", self._service_name],
                 timeout=30
             )
             return result.returncode == 0
-        except Exception as e:
-            print(f"OpenVPN start error: {e}")
+        except Exception:
+            logger.exception("OpenVPN start error")
             return False
 
     async def stop(self) -> bool:
         """Stop OpenVPN server service"""
         try:
-            result = subprocess.run(
-                ["systemctl", "stop", "openvpn"],
-                capture_output=True,
-                text=True,
+            result = await asyncio.to_thread(
+                subprocess.run,
+                ["systemctl", "stop", self._service_name],
                 timeout=30
             )
             return result.returncode == 0
-        except Exception as e:
-            print(f"OpenVPN stop error: {e}")
+        except Exception:
+            logger.exception("OpenVPN stop error")
             return False
 
     async def restart(self) -> bool:
         """Restart OpenVPN server service"""
         try:
-            result = subprocess.run(
-                ["systemctl", "restart", "openvpn"],
-                capture_output=True,
-                text=True,
+            result = await asyncio.to_thread(
+                subprocess.run,
+                ["systemctl", "restart", self._service_name],
                 timeout=30
             )
             return result.returncode == 0
-        except Exception as e:
-            print(f"OpenVPN restart error: {e}")
+        except Exception:
+            logger.exception("OpenVPN restart error")
             return False
 
     # ═══════════════════════════════════
@@ -70,10 +89,8 @@ class OpenVpnService:
     def is_running(self) -> bool:
         """Check if OpenVPN service is active"""
         try:
-            result = subprocess.run(
-                ["systemctl", "is-active", "openvpn"],
-                capture_output=True,
-                text=True,
+            result = self._run(
+                ["systemctl", "is-active", self._service_name],
                 timeout=5
             )
             return result.stdout.strip() == "active"
@@ -120,8 +137,8 @@ class OpenVpnService:
                             if len(parts) > 4 else ""
                         })
 
-        except Exception as e:
-            print(f"Error reading OpenVPN status: {e}")
+        except Exception:
+            logger.exception("Error reading OpenVPN status")
 
         return clients
 
@@ -146,27 +163,26 @@ class OpenVpnService:
             easyrsa_path = "/etc/openvpn/easy-rsa"
 
             # Generate client certificate
-            subprocess.run(
+            self._run(
                 [
                     f"{easyrsa_path}/easyrsa",
                     "gen-req",
                     client_name,
                     "nopass"
                 ],
-                capture_output=True,
                 cwd=easyrsa_path,
                 timeout=30
             )
 
-            subprocess.run(
+            self._run(
                 [
                     f"{easyrsa_path}/easyrsa",
                     "sign-req",
                     "client",
                     client_name
                 ],
-                input=b"yes\n",
-                capture_output=True,
+                input_data=b"yes\n",
+                text=False,
                 cwd=easyrsa_path,
                 timeout=30
             )
@@ -228,8 +244,8 @@ key-direction 1
 """
             return config
 
-        except Exception as e:
-            print(f"Config generation error: {e}")
+        except Exception:
+            logger.exception("Config generation error")
             return None
 
     def _read_file(
@@ -250,18 +266,18 @@ key-direction 1
         """Revoke a client's certificate"""
         try:
             easyrsa_path = "/etc/openvpn/easy-rsa"
-            result = subprocess.run(
+            result = self._run(
                 [
                     f"{easyrsa_path}/easyrsa",
                     "revoke",
                     client_name
                 ],
-                input=b"yes\n",
-                capture_output=True,
+                input_data=b"yes\n",
+                text=False,
                 cwd=easyrsa_path,
                 timeout=30
             )
             return result.returncode == 0
-        except Exception as e:
-            print(f"Revoke error: {e}")
+        except Exception:
+            logger.exception("Revoke error")
             return False

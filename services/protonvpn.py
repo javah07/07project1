@@ -1,11 +1,13 @@
 import subprocess
 import asyncio
+import logging
 from typing import Optional
 from config import (
     PROTON_USERNAME,
     PROTON_PASSWORD,
     PROTON_SERVER
 )
+logger = logging.getLogger(__name__)
 
 
 class ProtonVpnService:
@@ -40,7 +42,8 @@ class ProtonVpnService:
                 await self._login()
 
             # Connect to specified server/country
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 [
                     "protonvpn-cli",
                     "connect",
@@ -54,36 +57,38 @@ class ProtonVpnService:
 
             return result.returncode == 0
 
-        except Exception as e:
-            print(f"ProtonVPN connect error: {e}")
+        except Exception:
+            logger.exception("ProtonVPN connect error")
             return False
 
     async def disconnect(self) -> bool:
         """Disconnect from ProtonVPN"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["protonvpn-cli", "disconnect"],
                 capture_output=True,
                 text=True,
                 timeout=30
             )
             return result.returncode == 0
-        except Exception as e:
-            print(f"ProtonVPN disconnect error: {e}")
+        except Exception:
+            logger.exception("ProtonVPN disconnect error")
             return False
 
     async def reconnect(self) -> bool:
         """Reconnect to last ProtonVPN server"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["protonvpn-cli", "reconnect"],
                 capture_output=True,
                 text=True,
                 timeout=60
             )
             return result.returncode == 0
-        except Exception as e:
-            print(f"ProtonVPN reconnect error: {e}")
+        except Exception:
+            logger.exception("ProtonVPN reconnect error")
             return False
 
     # ═══════════════════════════════════
@@ -191,8 +196,8 @@ class ProtonVpnService:
 
             return info
 
-        except Exception as e:
-            print(f"ProtonVPN status error: {e}")
+        except Exception:
+            logger.exception("ProtonVPN status error")
             return {"connected": False}
 
     # ═══════════════════════════════════
@@ -221,6 +226,6 @@ class ProtonVpnService:
 
             return process.returncode == 0
 
-        except Exception as e:
-            print(f"ProtonVPN login error: {e}")
+        except Exception:
+            logger.exception("ProtonVPN login error")
             return False

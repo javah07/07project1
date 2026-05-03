@@ -1,7 +1,10 @@
 import subprocess
 import re
+import logging
+import asyncio
 from typing import Optional
 from config import WG_INTERFACE
+logger = logging.getLogger(__name__)
 
 
 class WireGuardService:
@@ -21,29 +24,31 @@ class WireGuardService:
     async def start(self) -> bool:
         """Bring up WireGuard interface"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["wg-quick", "up", WG_INTERFACE],
                 capture_output=True,
                 text=True,
                 timeout=30
             )
             return result.returncode == 0
-        except Exception as e:
-            print(f"WireGuard start error: {e}")
+        except Exception:
+            logger.exception("WireGuard start error")
             return False
 
     async def stop(self) -> bool:
         """Bring down WireGuard interface"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["wg-quick", "down", WG_INTERFACE],
                 capture_output=True,
                 text=True,
                 timeout=30
             )
             return result.returncode == 0
-        except Exception as e:
-            print(f"WireGuard stop error: {e}")
+        except Exception:
+            logger.exception("WireGuard stop error")
             return False
 
     # ═══════════════════════════════════
@@ -87,8 +92,8 @@ class WireGuardService:
                 "interface": WG_INTERFACE,
                 "peers": peers
             }
-        except Exception as e:
-            print(f"WireGuard status error: {e}")
+        except Exception:
+            logger.exception("WireGuard status error")
             return {"running": False, "peers": []}
 
     def _parse_peers(
@@ -199,8 +204,8 @@ class WireGuardService:
 
             return result.returncode == 0
 
-        except Exception as e:
-            print(f"Add peer error: {e}")
+        except Exception:
+            logger.exception("Add peer error")
             return False
 
     def remove_peer(
@@ -229,8 +234,8 @@ class WireGuardService:
 
             return result.returncode == 0
 
-        except Exception as e:
-            print(f"Remove peer error: {e}")
+        except Exception:
+            logger.exception("Remove peer error")
             return False
 
     def generate_keypair(self) -> dict:
@@ -263,6 +268,6 @@ class WireGuardService:
                 "public_key": public_key
             }
 
-        except Exception as e:
-            print(f"Keypair generation error: {e}")
+        except Exception:
+            logger.exception("Keypair generation error")
             return {}
