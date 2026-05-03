@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Response, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from jose import jwt
+from cryptography.hazmat.primitives import serialization
 from auth.keys import get_private_key, get_public_key
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -59,16 +60,9 @@ def _sign(payload: dict) -> str:
     private_key = get_private_key()
 
     private_pem = private_key.private_bytes(
-        encoding=__import__('cryptography')
-            .hazmat.primitives.serialization
-            .Encoding.PEM,
-        format=__import__('cryptography')
-            .hazmat.primitives.serialization
-            .PrivateFormat.TraditionalOpenSSL,
-        encryption_algorithm=__import__(
-            'cryptography')
-            .hazmat.primitives.serialization
-            .NoEncryption()
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption()
     )
 
     return jwt.encode(

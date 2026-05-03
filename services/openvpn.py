@@ -1,8 +1,10 @@
 import subprocess
 import os
 import asyncio
+import logging
 from typing import Optional
 from config import OPENVPN_CONFIG, CLIENTS_DIR
+logger = logging.getLogger(__name__)
 
 
 class OpenVpnService:
@@ -31,8 +33,8 @@ class OpenVpnService:
                 timeout=30
             )
             return result.returncode == 0
-        except Exception as e:
-            print(f"OpenVPN start error: {e}")
+        except Exception:
+            logger.exception("OpenVPN start error")
             return False
 
     async def stop(self) -> bool:
@@ -45,8 +47,8 @@ class OpenVpnService:
                 timeout=30
             )
             return result.returncode == 0
-        except Exception as e:
-            print(f"OpenVPN stop error: {e}")
+        except Exception:
+            logger.exception("OpenVPN stop error")
             return False
 
     async def restart(self) -> bool:
@@ -59,8 +61,8 @@ class OpenVpnService:
                 timeout=30
             )
             return result.returncode == 0
-        except Exception as e:
-            print(f"OpenVPN restart error: {e}")
+        except Exception:
+            logger.exception("OpenVPN restart error")
             return False
 
     # ═══════════════════════════════════
@@ -120,8 +122,8 @@ class OpenVpnService:
                             if len(parts) > 4 else ""
                         })
 
-        except Exception as e:
-            print(f"Error reading OpenVPN status: {e}")
+        except Exception:
+            logger.exception("Error reading OpenVPN status")
 
         return clients
 
