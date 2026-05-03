@@ -4,7 +4,7 @@ import bcrypt
 import time
 import base64
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Response, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from jose import jwt
@@ -155,7 +155,13 @@ async def jwks():
     "/register",
     response_model=TokenResponse,
 )
-async def register(body: RegisterRequest):
+async def register(body: RegisterRequest, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    if not _rate_check(client_ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests")
+
     username = body.username.strip().lower()
     password = body.password
 
@@ -206,7 +212,13 @@ async def register(body: RegisterRequest):
     "/login",
     response_model=TokenResponse,
 )
-async def login(body: LoginRequest):
+async def login(body: LoginRequest, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    if not _rate_check(client_ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests")
+
     username = body.username.strip().lower()
     password = body.password
 
