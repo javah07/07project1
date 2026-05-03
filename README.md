@@ -1,3 +1,1 @@
-finally start coding
-will start on aeroline biased 73
-Move and your entire staff feels the wrath of decrypting Quantu Encryption Onioning V1. (QEOv1)
+i have made everything in order, i believe I will get around 9 errors and i will need to fix this in 18 days, as i dont have unlimited claude tokens or copilot tokens
