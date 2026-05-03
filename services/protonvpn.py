@@ -1,11 +1,13 @@
 import subprocess
 import asyncio
+import logging
 from typing import Optional
 from config import (
     PROTON_USERNAME,
     PROTON_PASSWORD,
     PROTON_SERVER
 )
+logger = logging.getLogger(__name__)
 
 
 class ProtonVpnService:
@@ -40,7 +42,8 @@ class ProtonVpnService:
                 await self._login()
 
             # Connect to specified server/country
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                self._run,
                 [
                     "protonvpn-cli",
                     "connect",
@@ -54,36 +57,34 @@ class ProtonVpnService:
 
             return result.returncode == 0
 
-        except Exception as e:
-            print(f"ProtonVPN connect error: {e}")
+        except Exception:
+            logger.exception("ProtonVPN connect error")
             return False
 
     async def disconnect(self) -> bool:
         """Disconnect from ProtonVPN"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                self._run,
                 ["protonvpn-cli", "disconnect"],
-                capture_output=True,
-                text=True,
                 timeout=30
             )
             return result.returncode == 0
-        except Exception as e:
-            print(f"ProtonVPN disconnect error: {e}")
+        except Exception:
+            logger.exception("ProtonVPN disconnect error")
             return False
 
     async def reconnect(self) -> bool:
         """Reconnect to last ProtonVPN server"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                self._run,
                 ["protonvpn-cli", "reconnect"],
-                capture_output=True,
-                text=True,
                 timeout=60
             )
             return result.returncode == 0
-        except Exception as e:
-            print(f"ProtonVPN reconnect error: {e}")
+        except Exception:
+            logger.exception("ProtonVPN reconnect error")
             return False
 
     # ═══════════════════════════════════
@@ -93,12 +94,7 @@ class ProtonVpnService:
     def is_connected(self) -> bool:
         """Check if ProtonVPN is connected"""
         try:
-            result = subprocess.run(
-                ["protonvpn-cli", "status"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            result = self._run(["protonvpn-cli", "status"], timeout=10)
             output = result.stdout.lower()
             return "connected" in output
         except Exception:
@@ -107,12 +103,7 @@ class ProtonVpnService:
     def is_logged_in(self) -> bool:
         """Check if ProtonVPN CLI is logged in"""
         try:
-            result = subprocess.run(
-                ["protonvpn-cli", "status"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            result = self._run(["protonvpn-cli", "status"], timeout=10)
             # If not logged in, output contains error
             return "not logged in" not in (
                 result.stdout.lower() +
@@ -124,12 +115,7 @@ class ProtonVpnService:
     def get_current_ip(self) -> Optional[str]:
         """Get current IP from ProtonVPN status"""
         try:
-            result = subprocess.run(
-                ["protonvpn-cli", "status"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            result = self._run(["protonvpn-cli", "status"], timeout=10)
 
             for line in result.stdout.split("\n"):
                 if "ip" in line.lower():
@@ -145,12 +131,7 @@ class ProtonVpnService:
     def get_server_info(self) -> dict:
         """Get current ProtonVPN server details"""
         try:
-            result = subprocess.run(
-                ["protonvpn-cli", "status"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            result = self._run(["protonvpn-cli", "status"], timeout=10)
 
             info = {
                 "connected": False,
@@ -191,8 +172,8 @@ class ProtonVpnService:
 
             return info
 
-        except Exception as e:
-            print(f"ProtonVPN status error: {e}")
+        except Exception:
+            logger.exception("ProtonVPN status error")
             return {"connected": False}
 
     # ═══════════════════════════════════
@@ -221,6 +202,20 @@ class ProtonVpnService:
 
             return process.returncode == 0
 
-        except Exception as e:
-            print(f"ProtonVPN login error: {e}")
+        except Exception:
+            logger.exception("ProtonVPN login error")
             return False
+    @staticmethod
+    def _run(
+        cmd: list[str],
+        timeout: int = 30,
+        text: bool = True,
+        input_data=None
+    ) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=text,
+            timeout=timeout,
+            input=input_data
+        )
