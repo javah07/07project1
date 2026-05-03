@@ -1,6 +1,7 @@
 import subprocess
 import re
 import logging
+import asyncio
 from typing import Optional
 from config import WG_INTERFACE
 logger = logging.getLogger(__name__)
@@ -23,7 +24,8 @@ class WireGuardService:
     async def start(self) -> bool:
         """Bring up WireGuard interface"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["wg-quick", "up", WG_INTERFACE],
                 capture_output=True,
                 text=True,
@@ -37,7 +39,8 @@ class WireGuardService:
     async def stop(self) -> bool:
         """Bring down WireGuard interface"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["wg-quick", "down", WG_INTERFACE],
                 capture_output=True,
                 text=True,

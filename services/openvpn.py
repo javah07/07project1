@@ -26,7 +26,8 @@ class OpenVpnService:
     async def start(self) -> bool:
         """Start OpenVPN server service"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["systemctl", "start", "openvpn"],
                 capture_output=True,
                 text=True,
@@ -40,7 +41,8 @@ class OpenVpnService:
     async def stop(self) -> bool:
         """Stop OpenVPN server service"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["systemctl", "stop", "openvpn"],
                 capture_output=True,
                 text=True,
@@ -54,7 +56,8 @@ class OpenVpnService:
     async def restart(self) -> bool:
         """Restart OpenVPN server service"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["systemctl", "restart", "openvpn"],
                 capture_output=True,
                 text=True,

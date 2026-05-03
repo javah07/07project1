@@ -42,7 +42,8 @@ class ProtonVpnService:
                 await self._login()
 
             # Connect to specified server/country
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 [
                     "protonvpn-cli",
                     "connect",
@@ -63,7 +64,8 @@ class ProtonVpnService:
     async def disconnect(self) -> bool:
         """Disconnect from ProtonVPN"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["protonvpn-cli", "disconnect"],
                 capture_output=True,
                 text=True,
@@ -77,7 +79,8 @@ class ProtonVpnService:
     async def reconnect(self) -> bool:
         """Reconnect to last ProtonVPN server"""
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["protonvpn-cli", "reconnect"],
                 capture_output=True,
                 text=True,
