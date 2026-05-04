@@ -48,11 +48,11 @@ retry apt install -y \
 
 systemctl enable --now cron
 
-# ───── SYSCTL (PERSISTENT) ─────
+# ───── SYSCTL ─────
 echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-aerosky-forwarding.conf
 sysctl --system
 
-# ───── FIREWALL (SAFE ORDER) ─────
+# ───── FIREWALL ─────
 ufw allow 22/tcp || true
 ufw allow 51820/udp || true
 ufw allow 80/tcp || true
@@ -62,15 +62,15 @@ ufw --force enable
 # ───── USER ─────
 id "$APP_USER" &>/dev/null || useradd -r -m -d "$DEPLOY_DIR" -s /usr/sbin/nologin "$APP_USER"
 
-# ───── CODE ─────
+# ───── CODE (FIXED GIT OWNERSHIP) ─────
 if [ -d "$DEPLOY_DIR/.git" ]; then
   cd "$DEPLOY_DIR"
-  retry git fetch --all
-  DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')
-  retry git reset --hard "origin/$DEFAULT_BRANCH"
+  sudo -u "$APP_USER" -H git fetch --all
+  DEFAULT_BRANCH=$(sudo -u "$APP_USER" -H git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')
+  sudo -u "$APP_USER" -H git reset --hard "origin/$DEFAULT_BRANCH"
 else
   rm -rf "$DEPLOY_DIR"
-  retry git clone "$REP_URL" "$DEPLOY_DIR"
+  sudo -u "$APP_USER" -H git clone "$REP_URL" "$DEPLOY_DIR"
 fi
 
 chown -R "$APP_USER":"$APP_USER" "$DEPLOY_DIR"
@@ -127,16 +127,14 @@ chmod 700 "$DUCK_SCRIPT"
 (crontab -l 2>/dev/null | grep -v duckdns_update.sh; echo "*/5 * * * * $DUCK_SCRIPT") | crontab -
 bash "$DUCK_SCRIPT" || true
 
-# ───── WAIT FOR DNS PROPAGATION ─────
-echo "Waiting for DNS to resolve..."
+# ───── DNS WAIT ─────
 for i in {1..30}; do
-  if getent hosts "$DOMAIN" >/dev/null; then break; fi
+  getent hosts "$DOMAIN" && break
   sleep 2
 done
 
-# ───── NGINX (HTTP ONLY FIRST) ─────
+# ───── NGINX (HTTP) ─────
 rm -f /etc/nginx/sites-enabled/default
-
 mkdir -p /var/www/certbot
 
 cat > /etc/nginx/conf.d/aerosky.conf <<EOF
@@ -160,13 +158,12 @@ EOF
 
 nginx -t && systemctl restart nginx
 
-# ───── SSL (WEBROOT — SAFE RENEWALS) ─────
+# ───── SSL ─────
 retry certbot certonly --webroot \
   -w /var/www/certbot \
   -d "$DOMAIN" \
   --non-interactive --agree-tos -m "$EMAIL"
 
-# verify cert exists
 [ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ] || exit 1
 
 # ───── NGINX SSL ─────
