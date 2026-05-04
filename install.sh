@@ -1,10 +1,8 @@
 #!/bin/bash
-
 set -euo pipefail
 [[ "${DEBUG:-}" == "1" ]] && set -x
 umask 027
 
-# ───────────── CONFIG ─────────────
 APP_USER="aerosky"
 DEPLOY_DIR="/opt/aerosky"
 VENV_DIR="$DEPLOY_DIR/venv"
@@ -14,85 +12,81 @@ EMAIL="admin@$DOMAIN"
 DUCK_TOKEN="${DUCKDNS_TOKEN:-}"
 DUCK_TOKEN_FILE="/root/.duckdns_token"
 DUCK_SUBDOMAIN="${DOMAIN%%.duckdns.org}"
+HEALTH_PATH="${HEALTH_PATH:-/api/v1/health}"
 
 export DEBIAN_FRONTEND=noninteractive
 
-# ───────────── HELPERS ─────────────
 retry() {
   local attempts=3 delay=5
   for ((i=1;i<=attempts;i++)); do
-    "$@" && return 0 || {
-      echo "⚠️ Attempt $i failed: $*"
-      sleep $delay
-    }
+    "$@" && return 0 || sleep $delay
   done
-  echo "❌ Command failed after $attempts attempts: $*"
+  echo "Command failed: $*"
   exit 1
 }
 
-# ───────────── ROOT CHECK ─────────────
 [ "$EUID" -eq 0 ] || { echo "Run as root"; exit 1; }
 
-# ───────────── BASIC SANITY ─────────────
-echo "🔍 Checking system resources..."
-df -h / | awk 'NR==2 {if ($5+0 > 90) {print "Disk almost full"; exit 1}}'
-free -m | awk '/Mem:/ {if ($2 < 512) {print "Low memory"; exit 1}}'
+# ───── SYSTEM CHECKS ─────
+df -h / | awk 'NR==2 {if ($5+0 > 90) exit 1}'
+free -m | awk '/Mem:/ {if ($2 < 512) exit 1}'
 
-# ───────────── TOKEN ─────────────
+# ───── TOKEN ─────
 if [ -z "$DUCK_TOKEN" ]; then
-  read -p "Enter DuckDNS Token: " DUCK_TOKEN
+  read -r -p "DuckDNS Token: " DUCK_TOKEN
 fi
 echo "$DUCK_TOKEN" > "$DUCK_TOKEN_FILE"
 chmod 600 "$DUCK_TOKEN_FILE"
 
-echo "🚀 Starting deployment..."
-
-# ───────────── SYSTEM PREP ─────────────
+# ───── PACKAGES ─────
 retry apt update
-retry apt upgrade -y
-retry apt install -y python3 python3-pip python3-venv \
-  curl git ufw nginx certbot python3-certbot-nginx cron
+retry apt install -y \
+  python3 python3-pip python3-venv \
+  build-essential python3-dev \
+  ca-certificates iproute2 \
+  curl git ufw nginx certbot cron
 
-# ───────────── USER ─────────────
-if ! id "$APP_USER" &>/dev/null; then
-  useradd -r -m -d "$DEPLOY_DIR" -s /usr/sbin/nologin "$APP_USER"
-fi
+systemctl enable --now cron
 
-# ───────────── CODE ─────────────
+# ───── SYSCTL (PERSISTENT) ─────
+echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-aerosky-forwarding.conf
+sysctl --system
+
+# ───── FIREWALL (SAFE ORDER) ─────
+ufw allow 22/tcp || true
+ufw allow 51820/udp || true
+ufw allow 80/tcp || true
+ufw allow 443/tcp || true
+ufw --force enable
+
+# ───── USER ─────
+id "$APP_USER" &>/dev/null || useradd -r -m -d "$DEPLOY_DIR" -s /usr/sbin/nologin "$APP_USER"
+
+# ───── CODE ─────
 if [ -d "$DEPLOY_DIR/.git" ]; then
   cd "$DEPLOY_DIR"
   retry git fetch --all
-  retry git reset --hard origin/main
-elif [ -d "$DEPLOY_DIR" ] && [ -n "$(find "$DEPLOY_DIR" -mindepth 1 -maxdepth 1 2>/dev/null)" ]; then
-  echo "⚠️ $DEPLOY_DIR exists and is not a git repo."
-  echo "   Backing it up and cloning a fresh copy."
-  BACKUP_DIR="${DEPLOY_DIR}.bak.$(date +%Y%m%d%H%M%S)"
-  mv "$DEPLOY_DIR" "$BACKUP_DIR"
-  retry git clone "$REP_URL" "$DEPLOY_DIR"
+  DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')
+  retry git reset --hard "origin/$DEFAULT_BRANCH"
 else
-  mkdir -p "$DEPLOY_DIR"
+  rm -rf "$DEPLOY_DIR"
   retry git clone "$REP_URL" "$DEPLOY_DIR"
 fi
 
-# OPTIONAL: pin commit
-# git checkout <commit>
-
-# Ensure app user can create venv and write runtime files
 chown -R "$APP_USER":"$APP_USER" "$DEPLOY_DIR"
 
-# ───────────── PERMS ─────────────
+# ───── APP DIRS ─────
 mkdir -p /etc/aerosky/keys
 chown -R "$APP_USER":"$APP_USER" /etc/aerosky
 chmod 700 /etc/aerosky
 
-# ───────────── ENV ─────────────
+# ───── ENV ─────
 ENV_FILE="$DEPLOY_DIR/.env"
 if [ ! -f "$ENV_FILE" ]; then
   GEN_API_TOKEN=$(python3 -c "import secrets; print(secrets.token_hex(32))")
   GEN_TOTP=$(python3 -c "import secrets; print(secrets.token_hex(16))")
 
-  TMP_ENV=$(mktemp)
-  cat > "$TMP_ENV" <<EOF
+  cat > "$ENV_FILE" <<EOF
 HOST=127.0.0.1
 PORT=8000
 DOMAIN=$DOMAIN
@@ -107,91 +101,76 @@ DB_PATH=/etc/aerosky/aero.db
 KEY_DIR=/etc/aerosky/keys
 WG_INTERFACE=wg0
 EOF
-
-  mv "$TMP_ENV" "$ENV_FILE"
 fi
 
-chown "$APP_USER":"$APP_USER" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
+chown "$APP_USER":"$APP_USER" "$ENV_FILE"
 
-# ───────────── PYTHON ─────────────
-echo "🐍 Python setup..."
+# ───── PYTHON ─────
 if [ ! -d "$VENV_DIR" ]; then
-  sudo -u "$APP_USER" python3 -m venv "$VENV_DIR"
+  sudo -u "$APP_USER" -H python3 -m venv "$VENV_DIR"
 fi
 
-retry sudo -u "$APP_USER" "$VENV_DIR/bin/pip" install --upgrade pip
+sudo -u "$APP_USER" -H "$VENV_DIR/bin/pip" install --upgrade pip setuptools wheel
+sudo -u "$APP_USER" -H "$VENV_DIR/bin/pip" install -r "$DEPLOY_DIR/requirements.txt"
 
-# REQUIREMENTS SHOULD BE PINNED
-retry sudo -u "$APP_USER" "$VENV_DIR/bin/pip" install -r "$DEPLOY_DIR/requirements.txt"
-
-# ───────────── DUCKDNS ─────────────
-echo "🦆 DuckDNS setup..."
+# ───── DUCKDNS ─────
 DUCK_SCRIPT="/usr/local/bin/duckdns_update.sh"
-
 cat > "$DUCK_SCRIPT" <<EOF
 #!/bin/bash
 TOKEN=\$(cat $DUCK_TOKEN_FILE)
-curl -fsS "https://www.duckdns.org/update?domains=$DUCK_SUBDOMAIN&token=\$TOKEN&ip=" -o /var/log/duckdns.log
+curl -fsS --data "domains=$DUCK_SUBDOMAIN&token=\$TOKEN&ip=" \
+https://www.duckdns.org/update >> /var/log/duckdns.log 2>&1
 EOF
-
 chmod 700 "$DUCK_SCRIPT"
 
-(crontab -l 2>/dev/null | grep -Fv "$DUCK_SCRIPT"; echo "*/5 * * * * $DUCK_SCRIPT") | crontab -
+(crontab -l 2>/dev/null | grep -v duckdns_update.sh; echo "*/5 * * * * $DUCK_SCRIPT") | crontab -
+bash "$DUCK_SCRIPT" || true
 
-if ! bash "$DUCK_SCRIPT"; then
-  echo "⚠️ DuckDNS update failed (check token/domain/network)."
-  echo "   Continuing deployment; review /var/log/duckdns.log."
-fi
+# ───── WAIT FOR DNS PROPAGATION ─────
+echo "Waiting for DNS to resolve..."
+for i in {1..30}; do
+  if getent hosts "$DOMAIN" >/dev/null; then break; fi
+  sleep 2
+done
 
-# ───────────── SYSCTL ─────────────
-grep -q "^net.ipv4.ip_forward=1" /etc/sysctl.conf || echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-sysctl -w net.ipv4.ip_forward=1
+# ───── NGINX (HTTP ONLY FIRST) ─────
+rm -f /etc/nginx/sites-enabled/default
 
-# ───────────── FIREWALL ─────────────
-ufw --force reset
-ufw default deny incoming
-ufw default allow outgoing
-ufw allow 22/tcp
-ufw allow 51820/udp
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw --force enable
+mkdir -p /var/www/certbot
 
-# ───────────── NGINX ─────────────
-echo "🌐 Nginx setup..."
+cat > /etc/nginx/conf.d/aerosky.conf <<EOF
+limit_req_zone \$binary_remote_addr zone=aerosky:10m rate=20r/s;
 
-if ! grep -q "limit_req_zone" /etc/nginx/nginx.conf; then
-  sed -i '/http {/a \    limit_req_zone $binary_remote_addr zone=aerosky:10m rate=20r/s;\n    server_tokens off;' /etc/nginx/nginx.conf
-fi
-
-cat > /etc/nginx/sites-available/aerosky <<EOF
 server {
   listen 80;
   server_name $DOMAIN;
 
-  location /.well-known/acme-challenge/ { root /var/www/html; }
-  location / { return 301 https://\$host\$request_uri; }
+  location /.well-known/acme-challenge/ {
+    root /var/www/certbot;
+  }
+
+  location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+  }
 }
 EOF
 
-ln -sf /etc/nginx/sites-available/aerosky /etc/nginx/sites-enabled/aerosky
-rm -f /etc/nginx/sites-enabled/default
+nginx -t && systemctl restart nginx
 
-systemctl restart nginx
+# ───── SSL (WEBROOT — SAFE RENEWALS) ─────
+retry certbot certonly --webroot \
+  -w /var/www/certbot \
+  -d "$DOMAIN" \
+  --non-interactive --agree-tos -m "$EMAIL"
 
-# Check port 80
-if ss -tuln | grep -q ":80 "; then
-  echo "Port 80 OK"
-else
-  echo "❌ Port 80 not open"
-  exit 1
-fi
+# verify cert exists
+[ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ] || exit 1
 
-# ───────────── SSL ─────────────
-retry certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect
-
-cat > /etc/nginx/sites-available/aerosky <<EOF
+# ───── NGINX SSL ─────
+cat > /etc/nginx/conf.d/aerosky_ssl.conf <<EOF
 server {
   listen 443 ssl http2;
   server_name $DOMAIN;
@@ -213,36 +192,45 @@ server {
     proxy_set_header X-Forwarded-Proto \$scheme;
   }
 }
+
+server {
+  listen 80;
+  server_name $DOMAIN;
+  return 301 https://\$host\$request_uri;
+}
 EOF
 
 nginx -t && systemctl reload nginx
 
-# ───────────── SYSTEMD ─────────────
+# ───── SYSTEMD ─────
 cat > /etc/systemd/system/aerosky.service <<EOF
 [Unit]
 Description=AeroSky Backend
-After=network.target
+After=network-online.target nginx.service
+Wants=network-online.target
 
 [Service]
 User=$APP_USER
 Group=$APP_USER
 WorkingDirectory=$DEPLOY_DIR
+EnvironmentFile=$ENV_FILE
 Environment="PATH=$VENV_DIR/bin"
 
+ExecStartPre=/bin/sleep 2
 ExecStart=$VENV_DIR/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips=127.0.0.1
 
 Restart=always
 RestartSec=5
 
 NoNewPrivileges=true
-ProtectSystem=full
+ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictRealtime=true
 
-ReadWritePaths=$DEPLOY_DIR /etc/aerosky
+ReadWritePaths=$DEPLOY_DIR /etc/aerosky /tmp /run
 
 [Install]
 WantedBy=multi-user.target
@@ -252,25 +240,21 @@ systemctl daemon-reload
 systemctl enable aerosky
 systemctl restart aerosky
 
-# Verify systemd
 systemctl is-active --quiet aerosky || {
-  echo "❌ Service failed to start"
   journalctl -u aerosky -xe
   exit 1
 }
 
-# ───────────── HEALTH CHECK ─────────────
-echo "📡 Health check..."
+# ───── HEALTH CHECK ─────
 for i in {1..15}; do
-  STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/api/v1/health || true)
+  STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:8000$HEALTH_PATH" || true)
   [ "$STATUS" = "200" ] && break
   sleep 2
 done
 
-if [ "$STATUS" = "200" ]; then
-  echo "✅ LIVE: https://$DOMAIN"
-else
-  echo "⚠️ Health check failed"
+[ "$STATUS" = "200" ] || {
   journalctl -u aerosky -xe
   exit 1
-fi
+}
+
+echo "DEPLOYMENT SUCCESSFUL: https://$DOMAIN"
