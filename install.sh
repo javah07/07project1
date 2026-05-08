@@ -64,6 +64,8 @@ id "$APP_USER" &>/dev/null || useradd -r -m -d "$DEPLOY_DIR" -s /usr/sbin/nologi
 
 # ───── CODE (FIXED GIT OWNERSHIP) ─────
 if [ -d "$DEPLOY_DIR/.git" ]; then
+  # Prevent "dubious ownership" failures when running installer as root
+  git config --global --add safe.directory "$DEPLOY_DIR" || true
   cd "$DEPLOY_DIR"
   sudo -u "$APP_USER" -H git fetch --all
   DEFAULT_BRANCH=$(sudo -u "$APP_USER" -H git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')
